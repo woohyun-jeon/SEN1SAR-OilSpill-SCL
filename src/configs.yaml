@@ -1,0 +1,14 @@
+path:
+  sup_path: 'C:/Users/user/Desktop/oil/exp/out50'
+  out_path: 'C:/Users/user/Desktop/oil/exp/result/SupCon'
+
+params:
+  seed : 42
+  sup_epochs: 500
+  batch_size: 16
+  learning_rate: 0.0001
+  early_stopping_patience : 50
+  early_stopping_min_delta : 0.0001
+  lambda_con: 0.1
+  lambda_pixel: 0.5
+  temperature: 0.07
