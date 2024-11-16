@@ -60,45 +60,42 @@ class SupConLoss(nn.Module):
 
     def forward(self, features, labels):
         device = features.device
-        batch_size = features.shape[0]
 
         features = F.normalize(features, dim=1)
 
         # get mask of positive pairs based on labels
         labels = labels.contiguous().view(-1, 1)
-        mask = torch.eq(labels, labels.T).float().to(device)  # [B, B]
+        mask = torch.eq(labels, labels.T).float().to(device)
 
         # compute similarity matrix
-        anchor_dot_contrast = torch.matmul(features, features.T) / self.temperature  # [B, B]
+        sim_matrix = torch.matmul(features, features.T)
+        sim_matrix = sim_matrix / self.temperature
 
-        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
-        logits = anchor_dot_contrast - logits_max.detach()
+        # logits
+        logits_max, _ = torch.max(sim_matrix, dim=1, keepdim=True)
+        logits = sim_matrix - logits_max.detach()
 
-        # create mask that excludes self-contrast cases
-        logits_mask = torch.scatter(
-            torch.ones_like(mask),
-            1,
-            torch.arange(batch_size).view(-1, 1).to(device),
-            0
-        )
+        # exclude self-contrast cases
+        logits_mask = torch.ones_like(mask).to(device)
+        logits_mask.fill_diagonal_(0)
 
         mask = mask * logits_mask
 
-        # weight mask based on oil spill ratio if available
-        if labels.sum() > 0:  # if there are positive samples
+        # weight mask based on oil spill ratio
+        if labels.sum() > 0:
             pos_samples = (labels == 1).float()
             weight = pos_samples / (pos_samples.sum() + 1e-6)
             mask = mask * weight
 
         # compute log probability
         exp_logits = torch.exp(logits) * logits_mask
-        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
+        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True) + 1e-6)
 
         # compute mean of log probabilities for positive pairs
         mean_log_prob_pos = (mask * log_prob).sum(1) / (mask.sum(1) + 1e-6)
 
-        # scale loss by base temperature
+        # scale loss by temperature
         loss = -(self.base_temperature / self.temperature) * mean_log_prob_pos
-        loss = loss.mean()
+        loss = loss[mask.sum(1) > 0].mean() if mask.sum(1).sum() > 0 else torch.tensor(0.0).to(device)
 
         return loss

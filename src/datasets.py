@@ -93,13 +93,11 @@ def get_supervised_datasets(data_path, train_ids, val_ids, test_ids, supcon=Fals
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
-        # A.Normalize(mean=[0.4471, 0.6659, 0.5774, 0.3395], std=[0.1112, 0.2183, 0.2230, 0.1733]),
         A.Normalize(mean=[0.4471, 0.6659, 0.3395], std=[0.1112, 0.2183, 0.1733]), # use only intensity, entropy, alpha feature
     ])
 
     val_transform = A.Compose([
         A.Resize(256, 256),
-        # A.Normalize(mean=[0.4471, 0.6659, 0.5774, 0.3395], std=[0.1112, 0.2183, 0.2230, 0.1733]),
         A.Normalize(mean=[0.4471, 0.6659, 0.3395], std=[0.1112, 0.2183, 0.1733]), # use only intensity, entropy, alpha feature
     ])
 

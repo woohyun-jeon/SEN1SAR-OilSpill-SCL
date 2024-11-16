@@ -8,6 +8,7 @@ warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=NotGeoreferencedWarning)
 
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler
@@ -40,8 +41,8 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
 
                 optimizer.zero_grad()
 
-                seg1, proj1 = model(img1)
-                seg2, proj2 = model(img2)
+                seg1, feat1 = model(img1)
+                seg2, feat2 = model(img2)
 
                 # confirm dimension of label
                 if label1.dim() == 2:
@@ -56,17 +57,20 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
                 label1 = label1.float()
                 label2 = label2.float()
 
-                # segmentation loss
+                # segmentation loss for original size of 256
                 seg_loss = (loss_fn['seg'](seg1, label1) + loss_fn['seg'](seg2, label2)) / 2
 
-                # contrastive loss
-                projections = torch.cat([proj1, proj2], dim=0)
-                image_labels = torch.cat([
-                    (label1.view(label1.size(0), -1).sum(dim=1) > 0).long(),
-                    (label2.view(label2.size(0), -1).sum(dim=1) > 0).long()
-                ], dim=0)
+                # contrastive loss for size of 64
+                label1_small = F.interpolate(label1, size=(64, 64), mode='nearest')
+                label2_small = F.interpolate(label2, size=(64, 64), mode='nearest')
 
-                con_loss = loss_fn['con'](projections, image_labels)
+                features = torch.cat([feat1, feat2], dim=0)  # [2B, C, 64, 64]
+                pixel_labels = torch.cat([label1_small, label2_small], dim=0)  # [2B, 1, 64, 64]
+
+                features = features.permute(0, 2, 3, 1).reshape(-1, features.size(1))  # [2B*64*64, C]
+                pixel_labels = pixel_labels.reshape(-1)  # [2B*64*64]
+
+                con_loss = loss_fn['con'](features, pixel_labels)
 
                 # total loss
                 loss = seg_loss + config['params'].get('lambda_con', 1.0) * con_loss
@@ -231,9 +235,12 @@ def main():
     test_ids = load_dataset_ids(os.path.join(cfgs['path']['sup_path'], 'test.txt'))
 
     models = [
-        {'name': 'UNet', 'encoder': 'resnet50', 'pretrained': None},
+        {'name': 'SupConUNet', 'encoder': 'resnet50', 'pretrained': 'SupCon'},
         {'name': 'UNet', 'encoder': 'resnet50', 'pretrained': 'ImageNet'},
-        {'name': 'SupConUNet', 'encoder': 'resnet50', 'pretrained': 'SupCon'}
+        {'name': 'UNet', 'encoder': 'resnet50', 'pretrained': None},
+        {'name': 'SupConUNet', 'encoder': 'resnet101', 'pretrained': 'SupCon'},
+        {'name': 'UNet', 'encoder': 'resnet101', 'pretrained': 'ImageNet'},
+        {'name': 'UNet', 'encoder': 'resnet101', 'pretrained': None},
     ]
 
     results = {}
@@ -294,9 +301,9 @@ def main():
                 print(f"    {metric}: {value:.4f}")
 
         # save model and predictions
-        output_dir = os.path.join(cfgs['path']['out_path'], f'{model_name}_{pretraining}')
+        output_dir = os.path.join(cfgs['path']['out_path'], f'{model_name}_{encoder_name}_{pretraining}')
         os.makedirs(output_dir, exist_ok=True)
-        torch.save(model.state_dict(), os.path.join(output_dir, f'{model_name}_{pretraining}.pth'))
+        torch.save(model.state_dict(), os.path.join(output_dir, f'{model_name}_{encoder_name}_{pretraining}.pth'))
 
         for split, loader in dataloaders.items():
             save_predictions(model=model, dataloader=loader, save_dir=os.path.join(output_dir, f'{split}_predictions'), device=device)

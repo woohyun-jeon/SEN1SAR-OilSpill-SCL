@@ -10,6 +10,11 @@ def get_encoder(encoder_name, pretrained='IMAGENET1K_V1'):
             weights = models.ResNet50_Weights.IMAGENET1K_V1
         else:
             weights = None
+    elif encoder_name == 'resnet101':
+        if pretrained:
+            weights = models.ResNet101_Weights.IMAGENET1K_V1
+        else:
+            weights = None
     else:
         raise ValueError(f"Encoder {encoder_name} is not supported")
 
@@ -20,6 +25,17 @@ def get_encoder(encoder_name, pretrained='IMAGENET1K_V1'):
     encoder.name = encoder_name
 
     return encoder
+
+
+def get_model(model_name, encoder_name, pretrained='IMAGENET1K_V1', n_classes=1):
+    encoder = get_encoder(encoder_name, pretrained)
+
+    if model_name == 'UNet':
+        return UNet(encoder, n_classes)
+    elif model_name == 'SupConUNet':
+        return SupConUNet(encoder, n_classes)
+    else:
+        raise ValueError(f"Model {model_name} is not supported")
 
 
 class UNet(nn.Module):
@@ -33,16 +49,16 @@ class UNet(nn.Module):
         x = self.encoder[0](x)  # Conv1
         x = self.encoder[1](x)  # BatchNorm1
         x = self.encoder[2](x)  # ReLU
-        features.append(x)      # features[0]
+        features.append(x)  # features[0]
         x = self.encoder[3](x)  # MaxPool
         x = self.encoder[4](x)  # Layer1
-        features.append(x)      # features[1]
+        features.append(x)  # features[1]
         x = self.encoder[5](x)  # Layer2
-        features.append(x)      # features[2]
+        features.append(x)  # features[2]
         x = self.encoder[6](x)  # Layer3
-        features.append(x)      # features[3]
+        features.append(x)  # features[3]
         x = self.encoder[7](x)  # Layer4
-        features.append(x)      # features[4]
+        features.append(x)  # features[4]
         out = self.decoder(features)
 
         return out
@@ -107,55 +123,31 @@ class SupConUNet(nn.Module):
         self.encoder = encoder
         self.decoder = UNetDecoder(n_classes)
 
-        # set multi-scale projectors
-        self.projectors = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(in_channels, 512, 1),
-                nn.BatchNorm2d(num_features=512),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(512, feature_dim, 1)
-            ) for in_channels in [64, 256, 512, 1024, 2048]  # 각 feature map의 채널 수
-        ])
-
-        # set attention module for feature fusion
-        self.attention = nn.MultiheadAttention(feature_dim, 8)
+        # get size of 64
+        self.pixel_projector = nn.Sequential(
+            nn.Conv2d(2048, 512, 1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, feature_dim, 1),
+            nn.AdaptiveAvgPool2d((64, 64))  # 128x128 -> 64x64
+        )
 
     def forward(self, x):
         features = []
-        projected_features = []
 
         for i, layer in enumerate(self.encoder):
             x = layer(x)
             if i in [2, 4, 5, 6, 7]:
                 features.append(x)
-                # project each feature map
-                proj = self.projectors[len(projected_features)](x)
-                # set global average pooling
-                proj = F.adaptive_avg_pool2d(proj, 1).squeeze(-1).squeeze(-1)
-                projected_features.append(proj)
 
-        # get segmentation output
+        # for segmentation
         segmentation = self.decoder(features)
 
-        # stack projected features and apply attention
-        stacked_features = torch.stack(projected_features, dim=0)  # [5, B, feature_dim]
-        attended_features, _ = self.attention(stacked_features, stacked_features, stacked_features)
+        # for contrastive learning
+        pixel_features = self.pixel_projector(features[-1])
+        pixel_features = F.normalize(pixel_features, dim=1)
 
-        # combine features with attention weights
-        final_features = torch.mean(attended_features, dim=0)  # [B, feature_dim]
-
-        return segmentation, F.normalize(final_features, dim=1)
-
-
-def get_model(model_name, encoder_name, pretrained='IMAGENET1K_V1', n_classes=1):
-    encoder = get_encoder(encoder_name, pretrained)
-
-    if model_name == 'UNet':
-        return UNet(encoder, n_classes)
-    elif model_name == 'SupConUNet':
-        return SupConUNet(encoder, n_classes)
-    else:
-        raise ValueError(f"Model {model_name} is not supported")
+        return segmentation, pixel_features
 
 
 # test code
