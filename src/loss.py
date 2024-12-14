@@ -61,9 +61,25 @@ class SupConLoss(nn.Module):
     def forward(self, features, labels):
         device = features.device
 
+        # features: [2B*64*64, C], labels: [2B*64*64]
         features = F.normalize(features, dim=1)
 
-        # get mask of positive pairs based on labels
+        # 1. get oil spill pixels
+        oil_indices = (labels > 0).nonzero().squeeze()
+        if len(oil_indices) == 0:
+            return torch.tensor(0.0, device=device)
+
+        # 2.rRandomly sample same number of background pixels
+        bg_indices = (labels == 0).nonzero().squeeze()
+        n_oil = len(oil_indices)
+        bg_indices = bg_indices[torch.randperm(len(bg_indices))[:n_oil]]
+
+        # 3.cCombine selected indices
+        selected_indices = torch.cat([oil_indices, bg_indices])
+        features = features[selected_indices]
+        labels = labels[selected_indices]
+
+        # 4. compute contrastive loss with balanced samples
         labels = labels.contiguous().view(-1, 1)
         mask = torch.eq(labels, labels.T).float().to(device)
 
@@ -81,12 +97,6 @@ class SupConLoss(nn.Module):
 
         mask = mask * logits_mask
 
-        # weight mask based on oil spill ratio
-        if labels.sum() > 0:
-            pos_samples = (labels == 1).float()
-            weight = pos_samples / (pos_samples.sum() + 1e-6)
-            mask = mask * weight
-
         # compute log probability
         exp_logits = torch.exp(logits) * logits_mask
         log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True) + 1e-6)
@@ -96,6 +106,6 @@ class SupConLoss(nn.Module):
 
         # scale loss by temperature
         loss = -(self.base_temperature / self.temperature) * mean_log_prob_pos
-        loss = loss[mask.sum(1) > 0].mean() if mask.sum(1).sum() > 0 else torch.tensor(0.0).to(device)
+        loss = loss.mean()
 
         return loss

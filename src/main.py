@@ -8,6 +8,7 @@ warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=NotGeoreferencedWarning)
 
 import torch
+torch.cuda.empty_cache()
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -34,7 +35,8 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
         running_loss = 0.0
 
         for i, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch [{epoch + 1}/{config['params']['sup_epochs']}]")):
-            if config['model']['type'] == 'SupConUNet':
+            # for SupCon models
+            if config['model']['type'] in ['SupConUNet', 'SupConDeepLabV3Plus']:
                 (img1, img2), (label1, label2), _ = batch
                 img1, img2 = img1.to(device), img2.to(device)
                 label1, label2 = label1.to(device), label2.to(device)
@@ -44,7 +46,6 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
                 seg1, feat1 = model(img1)
                 seg2, feat2 = model(img2)
 
-                # confirm dimension of label
                 if label1.dim() == 2:
                     label1 = label1.unsqueeze(0)
                 if label2.dim() == 2:
@@ -57,18 +58,18 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
                 label1 = label1.float()
                 label2 = label2.float()
 
-                # segmentation loss for original size of 256
+                # segmentation loss
                 seg_loss = (loss_fn['seg'](seg1, label1) + loss_fn['seg'](seg2, label2)) / 2
 
-                # contrastive loss for size of 64
+                # contrastive loss
                 label1_small = F.interpolate(label1, size=(64, 64), mode='nearest')
                 label2_small = F.interpolate(label2, size=(64, 64), mode='nearest')
 
-                features = torch.cat([feat1, feat2], dim=0)  # [2B, C, 64, 64]
-                pixel_labels = torch.cat([label1_small, label2_small], dim=0)  # [2B, 1, 64, 64]
+                features = torch.cat([feat1, feat2], dim=0)
+                pixel_labels = torch.cat([label1_small, label2_small], dim=0)
 
-                features = features.permute(0, 2, 3, 1).reshape(-1, features.size(1))  # [2B*64*64, C]
-                pixel_labels = pixel_labels.reshape(-1)  # [2B*64*64]
+                features = features.permute(0, 2, 3, 1).reshape(-1, features.size(1))
+                pixel_labels = pixel_labels.reshape(-1)
 
                 con_loss = loss_fn['con'](features, pixel_labels)
 
@@ -83,7 +84,6 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
 
                 outputs = model(img)
 
-                # confirm dimension of label
                 if label.dim() == 2:
                     label = label.unsqueeze(0)
                 if label.dim() == 3:
@@ -127,7 +127,7 @@ def evaluate_model(model, dataloader, loss_fn, device, config):
 
     with torch.no_grad():
         for batch in dataloader:
-            if config['model']['type'] == 'SupConUNet':
+            if config['model']['type'] in ['SupConUNet', 'SupConDeepLabV3Plus']:
                 (images, _), (labels, _), _ = batch
             else:
                 images, labels, _ = batch
@@ -140,7 +140,7 @@ def evaluate_model(model, dataloader, loss_fn, device, config):
             images = images.to(device)
             labels = labels.to(device).unsqueeze(1).float()
 
-            if config['model']['type'] == 'SupConUNet':
+            if config['model']['type'] in ['SupConUNet', 'SupConDeepLabV3Plus']:
                 outputs, _ = model(images)
                 loss = loss_fn['seg'](outputs, labels)
             else:
@@ -169,9 +169,9 @@ def save_predictions(model, dataloader, save_dir, device):
     model.eval()
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
-            if isinstance(batch[0], tuple):  # SupConUNet case
+            if isinstance(batch[0], tuple):
                 (images, _), _, filenames = batch
-            else:  # UNet case
+            else:
                 images, _, filenames = batch
 
             if isinstance(images, list):
@@ -179,6 +179,7 @@ def save_predictions(model, dataloader, save_dir, device):
 
             images = images.to(device)
             outputs = model(images)
+
             if isinstance(outputs, tuple):
                 outputs = outputs[0]
             outputs = outputs.cpu().numpy()
@@ -214,7 +215,7 @@ def prepare_model_and_loss(config, train_dataset, device):
         model = get_model(config['model']['type'], config['model']['encoder'], pretrained=False)
         criterion = {
             'seg': FocalLoss(pos_weight=pos_weight).to(device),
-            'con': SupConLoss(temperature=0.07).to(device)  # lambda_pixel 제거
+            'con': SupConLoss(temperature=0.07).to(device)
         }
     elif config['model']['pretrained'] is None:
         model = get_model(config['model']['type'], config['model']['encoder'], pretrained=False)
@@ -241,6 +242,12 @@ def main():
         {'name': 'SupConUNet', 'encoder': 'resnet101', 'pretrained': 'SupCon'},
         {'name': 'UNet', 'encoder': 'resnet101', 'pretrained': 'ImageNet'},
         {'name': 'UNet', 'encoder': 'resnet101', 'pretrained': None},
+        {'name': 'SupConDeepLabV3Plus', 'encoder': 'resnet50', 'pretrained': 'SupCon'},
+        {'name': 'DeepLabV3Plus', 'encoder': 'resnet50', 'pretrained': 'ImageNet'},
+        {'name': 'DeepLabV3Plus', 'encoder': 'resnet50', 'pretrained': None},
+        {'name': 'SupConDeepLabV3Plus', 'encoder': 'resnet101', 'pretrained': 'SupCon'},
+        {'name': 'DeepLabV3Plus', 'encoder': 'resnet101', 'pretrained': 'ImageNet'},
+        {'name': 'DeepLabV3Plus', 'encoder': 'resnet101', 'pretrained': None},
     ]
 
     results = {}
@@ -258,7 +265,7 @@ def main():
             'pretrained': pretraining
         }
 
-        use_supcon = model_name == 'SupConUNet'
+        use_supcon = model_name in ['SupConUNet', 'SupConDeepLabV3Plus']
 
         # get datasets and dataloaders
         train_dataset, val_dataset, test_dataset = get_supervised_datasets(

@@ -9,8 +9,8 @@ This repository contains the implementation of oil spill detection using dual-po
 ## Usage
 1) Clone the repository and install the required dependencies with the following command:
 ```
-$ git clone https://github.com/woohyun-jeon/SEN1SAR-OilSpill-SupCon.git
-$ cd SEN1SAR-OilSpill
+$ git clone https://github.com/woohyun-jeon/SEN1SAR-OilSpill-SCL.git
+$ cd SEN1SAR-OilSpill-SCL
 $ pip install -r requirements.txt
 ```
 2) Download datasets from here:
