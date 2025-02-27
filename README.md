@@ -1,4 +1,4 @@
-# OIl Spill detection with dual-polarimetric Sentinel-1 SAR images
+# Oil spill detection with dual-polarimetric Sentinel-1 SAR images
 This repository contains the implementation of oil spill detection using dual-polarimetric Sentinel-1 SAR images.
 
 ## Prerequisites
@@ -14,7 +14,7 @@ $ cd SEN1SAR-OilSpill-SCL
 $ pip install -r requirements.txt
 ```
 2) Download datasets from here:
-https://drive.google.com/drive/folders/1h3-n54Vr3Wxm-O8QFqdAMG0l7yxpvi_a?usp=sharing
+https://drive.google.com/drive/folders/1aAYPKh5zh7SP9RD1-c4-1Di44KdWJ-5x?usp=drive_link
 
 The directory structure should be as follows:
 ```
@@ -30,7 +30,7 @@ The directory structure should be as follows:
   valid.txt
   test.txt
 ```
-* It is important to mention that "data_path" argument in "configs.yaml" file, denoting the parent directory of image & label path, should be properly adjusted.
+* It is important to mention that "sup_path" argument in "configs.yaml" file, denoting the parent directory of image & label path, should be properly adjusted.
 * Plus, "out_path" argument, indicating output directory of prediction and model files, should be properly adjusted.
 
 3) Run main.py code with the following command:
