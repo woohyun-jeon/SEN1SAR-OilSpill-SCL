@@ -8,24 +8,21 @@ warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=NotGeoreferencedWarning)
 
 import torch
-torch.cuda.empty_cache()
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from datasets import get_supervised_datasets
 from models import get_model
-from utils import load_dataset_ids, load_config, set_seed, EarlyStopping
-from loss import FocalLoss, SupConLoss, calculate_class_weights
-from metrics import get_metrics
+from utils import load_dataset_ids, load_config, set_seed, EarlyStopping, get_metrics
+from losses import FocalLoss, SupConLoss, calculate_class_weights
 
 
-# execute supervised training
 def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, device, config):
     model.to(device)
-    scaler = GradScaler()
+    scaler = GradScaler('cuda')
     early_stopping = EarlyStopping(patience=config['params']['early_stopping_patience'], min_delta=config['params']['early_stopping_min_delta'])
     best_loss = float('inf')
     best_model_state = None
@@ -35,7 +32,6 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
         running_loss = 0.0
 
         for i, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch [{epoch + 1}/{config['params']['sup_epochs']}]")):
-            # for SupCon models
             if config['model']['type'] in ['SupConUNet', 'SupConDeepLabV3Plus']:
                 (img1, img2), (label1, label2), _ = batch
                 img1, img2 = img1.to(device), img2.to(device)
@@ -58,10 +54,8 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
                 label1 = label1.float()
                 label2 = label2.float()
 
-                # segmentation loss
                 seg_loss = (loss_fn['seg'](seg1, label1) + loss_fn['seg'](seg2, label2)) / 2
 
-                # contrastive loss
                 label1_small = F.interpolate(label1, size=(64, 64), mode='nearest')
                 label2_small = F.interpolate(label2, size=(64, 64), mode='nearest')
 
@@ -73,7 +67,6 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
 
                 con_loss = loss_fn['con'](features, pixel_labels)
 
-                # total loss
                 loss = seg_loss + config['params'].get('lambda_con', 1.0) * con_loss
             else:
                 img, label, _ = batch
@@ -108,14 +101,14 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, loss_fn, 
         avg_val_loss = val_metrics['loss']
         print(f"Epoch [{epoch + 1}/{config['params']['sup_epochs']}], Val Loss: {avg_val_loss:.4f}")
 
-        if early_stopping.step(avg_val_loss):
-            print(f"Early stopping at epoch {epoch + 1}")
-            break
-
         if avg_val_loss < best_loss:
             best_loss = avg_val_loss
             best_model_state = model.state_dict()
             print(f"Best model saved at epoch {epoch + 1}")
+
+        if early_stopping(avg_val_loss):
+            print(f"Early stopping at epoch {epoch + 1}")
+            break
 
     return best_model_state, val_metrics
 
@@ -228,9 +221,8 @@ def main():
     config_path = 'configs.yaml'
     cfgs = load_config(config_path)
     set_seed(seed=cfgs['params']['seed'])
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(f"cuda:{cfgs['params']['gpu_idx']}" if torch.cuda.is_available() else 'cpu')
 
-    # load dataset IDs
     train_ids = load_dataset_ids(os.path.join(cfgs['path']['sup_path'], 'train.txt'))
     val_ids = load_dataset_ids(os.path.join(cfgs['path']['sup_path'], 'valid.txt'))
     test_ids = load_dataset_ids(os.path.join(cfgs['path']['sup_path'], 'test.txt'))
@@ -267,7 +259,6 @@ def main():
 
         use_supcon = model_name in ['SupConUNet', 'SupConDeepLabV3Plus']
 
-        # get datasets and dataloaders
         train_dataset, val_dataset, test_dataset = get_supervised_datasets(
             cfgs['path']['sup_path'], train_ids, val_ids, test_ids, supcon=use_supcon
         )
@@ -281,14 +272,12 @@ def main():
         optimizer = optim.Adam(model.parameters(), lr=cfgs['params']['learning_rate'])
         scheduler = CosineAnnealingLR(optimizer, T_max=cfgs['params']['sup_epochs'])
 
-        # train
         best_model_state, best_val_metrics = train_model(
             model=model, train_loader=train_loader, val_loader=val_loader,
             optimizer=optimizer, scheduler=scheduler,
             loss_fn=criterion, device=device, config=cfgs
         )
 
-        # evaluate
         model.load_state_dict(best_model_state)
         train_metrics = evaluate_model(model, train_loader, criterion, device, cfgs)
         val_metrics = best_val_metrics
@@ -307,7 +296,6 @@ def main():
             for metric, value in metrics.items():
                 print(f"    {metric}: {value:.4f}")
 
-        # save model and predictions
         output_dir = os.path.join(cfgs['path']['out_path'], f'{model_name}_{encoder_name}_{pretraining}')
         os.makedirs(output_dir, exist_ok=True)
         torch.save(model.state_dict(), os.path.join(output_dir, f'{model_name}_{encoder_name}_{pretraining}.pth'))
@@ -315,8 +303,8 @@ def main():
         for split, loader in dataloaders.items():
             save_predictions(model=model, dataloader=loader, save_dir=os.path.join(output_dir, f'{split}_predictions'), device=device)
 
-    # save final results summary
     print("\nFinal Results Summary:")
+    os.makedirs(cfgs['path']['out_path'], exist_ok=True)
     with open(os.path.join(cfgs['path']['out_path'], 'result_summary.txt'), 'w') as f:
         for model_name, result in results.items():
             print(f"{model_name}:")

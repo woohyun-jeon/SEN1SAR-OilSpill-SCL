@@ -38,3 +38,20 @@ The directory structure should be as follows:
 $ cd src
 $ python main.py
 ```
+
+## Citation
+If you find this work useful, please cite:
+```
+Jeon, W., Yi, J., & Kim, Y. (2026). Oil spill detection from dual-polarimetric Sentinel-1 SAR imagery with supervised contrastive learning. Remote Sensing Letters, 17(2), 148-157.
+```
+```bibtex
+@article{jeon2026oilspill,
+  title={Oil spill detection from dual-polarimetric Sentinel-1 SAR imagery with supervised contrastive learning},
+  author={Jeon, W. and Yi, J. and Kim, Y.},
+  journal={Remote Sensing Letters},
+  volume={17},
+  number={2},
+  pages={148--157},
+  year={2026}
+}
+```

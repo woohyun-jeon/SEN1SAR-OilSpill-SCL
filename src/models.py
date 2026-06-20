@@ -6,15 +6,9 @@ from torchvision import models
 
 def get_encoder(encoder_name, pretrained='IMAGENET1K_V1'):
     if encoder_name == 'resnet50':
-        if pretrained:
-            weights = models.ResNet50_Weights.IMAGENET1K_V1
-        else:
-            weights = None
+        weights = models.ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
     elif encoder_name == 'resnet101':
-        if pretrained:
-            weights = models.ResNet101_Weights.IMAGENET1K_V1
-        else:
-            weights = None
+        weights = models.ResNet101_Weights.IMAGENET1K_V1 if pretrained else None
     else:
         raise ValueError(f"Encoder {encoder_name} is not supported")
 
@@ -42,7 +36,6 @@ def get_model(model_name, encoder_name, pretrained='IMAGENET1K_V1', n_classes=1)
         raise ValueError(f"Model {model_name} is not supported")
 
 
-# ===== UNet =====
 class UNet(nn.Module):
     def __init__(self, encoder, n_classes=1):
         super(UNet, self).__init__()
@@ -51,19 +44,19 @@ class UNet(nn.Module):
 
     def forward(self, x):
         features = []
-        x = self.encoder[0](x)  # Conv1
-        x = self.encoder[1](x)  # BatchNorm1
-        x = self.encoder[2](x)  # ReLU
-        features.append(x)  # features[0]
-        x = self.encoder[3](x)  # MaxPool
-        x = self.encoder[4](x)  # Layer1
-        features.append(x)  # features[1]
-        x = self.encoder[5](x)  # Layer2
-        features.append(x)  # features[2]
-        x = self.encoder[6](x)  # Layer3
-        features.append(x)  # features[3]
-        x = self.encoder[7](x)  # Layer4
-        features.append(x)  # features[4]
+        x = self.encoder[0](x)
+        x = self.encoder[1](x)
+        x = self.encoder[2](x)
+        features.append(x)
+        x = self.encoder[3](x)
+        x = self.encoder[4](x)
+        features.append(x)
+        x = self.encoder[5](x)
+        features.append(x)
+        x = self.encoder[6](x)
+        features.append(x)
+        x = self.encoder[7](x)
+        features.append(x)
         out = self.decoder(features)
 
         return out
@@ -133,7 +126,7 @@ class SupConUNet(nn.Module):
             nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, feature_dim, 1),
-            nn.AdaptiveAvgPool2d((64, 64))  # 128x128 -> 64x64
+            nn.AdaptiveAvgPool2d((64, 64))
         )
 
     def forward(self, x):
@@ -144,17 +137,14 @@ class SupConUNet(nn.Module):
             if i in [2, 4, 5, 6, 7]:
                 features.append(x)
 
-        # segmentation --- 256x256
         segmentation = self.decoder(features)
 
-        # contrastive learning --- 64x64
         pixel_features = self.pixel_projector(features[-1])
         pixel_features = F.normalize(pixel_features, dim=1)
 
         return segmentation, pixel_features
 
 
-# ===== DeepLab v3+ =====
 class ASPPConv(nn.Sequential):
     def __init__(self, in_channels, out_channels, dilation):
         super().__init__(
@@ -183,23 +173,19 @@ class ASPP(nn.Module):
     def __init__(self, in_channels, out_channels, atrous_rates):
         super().__init__()
         modules = []
-        # 1x1 convolution
         modules.append(nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)))
 
-        # atrous convolutions
         rates = tuple(atrous_rates)
         for rate in rates:
             modules.append(ASPPConv(in_channels, out_channels, rate))
 
-        # global pooling branch
         modules.append(ASPPPooling(in_channels, out_channels))
 
         self.convs = nn.ModuleList(modules)
 
-        # final 1x1 convolution to reduce channels
         self.project = nn.Sequential(
             nn.Conv2d(len(self.convs) * out_channels, out_channels, 1, bias=False),
             nn.BatchNorm2d(out_channels),
@@ -319,7 +305,6 @@ class SupConDeepLabV3Plus(nn.Module):
         return x_seg, x_con
 
 
-# test code
 if __name__ == "__main__":
     batch_size = 2
     input_channels = 3
@@ -328,23 +313,19 @@ if __name__ == "__main__":
     n_classes = 1
 
     encoder = get_encoder('resnet50', pretrained=None)
-
     input_tensor = torch.randn(batch_size, input_channels, input_height, input_width)
 
-    print("Starting UNet forward pass...")
     model_unet = UNet(encoder, n_classes)
     output_unet = model_unet(input_tensor)
     print(f"UNet output shape: {output_unet.shape}")
 
-    print("\nStarting DeepLabV3+ forward pass...")
+    encoder = get_encoder('resnet50', pretrained=None)
     model_deeplabv3plus = DeepLabV3Plus(encoder, n_classes)
     output_deeplabv3plus = model_deeplabv3plus(input_tensor)
     print(f"DeepLabV3+ output shape: {output_deeplabv3plus.shape}")
 
-    print("\nStarting SupConDeepLabV3+ forward pass...")
+    encoder = get_encoder('resnet50', pretrained=None)
     model_supcon = SupConDeepLabV3Plus(encoder, n_classes)
     seg_output, con_output = model_supcon(input_tensor)
     print(f"SupConDeepLabV3+ segmentation output shape: {seg_output.shape}")
     print(f"SupConDeepLabV3+ contrastive output shape: {con_output.shape}")
-
-    print("\nAll model tests completed successfully!")

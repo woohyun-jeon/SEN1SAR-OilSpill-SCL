@@ -11,7 +11,6 @@ from torch.utils.data import Dataset
 import albumentations as A
 
 
-# 4 channels :intensity, entropy, anisotropy, alpha
 class Sen1OilDataset(Dataset):
     def __init__(self, data_dir, dataset_ids, transform=None, load_labels=True, supcon=False):
         self.load_labels = load_labels
@@ -31,12 +30,6 @@ class Sen1OilDataset(Dataset):
             if os.path.exists(image_file) and os.path.exists(label_file):
                 self.image_files.append(image_file)
                 self.label_files.append(label_file)
-            else:
-                print(f"Warning: Missing files for dataset ID {dataset_id}")
-                if not os.path.exists(image_file):
-                    print(f"  Image file not found: {image_file}")
-                if not os.path.exists(label_file):
-                    print(f"  Mask file not found: {label_file}")
 
         if len(self.image_files) == 0:
             raise ValueError(f"No image files found for the given dataset IDs in {self.image_dir}")
@@ -77,8 +70,8 @@ class Sen1OilDataset(Dataset):
 
     def load_image(self, path):
         with rasterio.open(path) as src:
-            img = src.read([1,2,4]).astype(np.float32)  # use only intensity, entropy, alpha feature
-            img = np.transpose(img, (1, 2, 0))  # CxHxW -> HxWxC
+            img = src.read([1, 2, 4]).astype(np.float32)
+            img = np.transpose(img, (1, 2, 0))
         return img
 
     def load_label(self, path):
@@ -93,14 +86,12 @@ def get_supervised_datasets(data_path, train_ids, val_ids, test_ids, supcon=Fals
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
-        # A.Normalize(mean=[0.4471, 0.6659, 0.5774, 0.3395], std=[0.1112, 0.2183, 0.2230, 0.1733]),
-        A.Normalize(mean=[0.4471, 0.6659, 0.3395], std=[0.1112, 0.2183, 0.1733]), # use only intensity, entropy, alpha feature
+        A.Normalize(mean=[0.4471, 0.6659, 0.3395], std=[0.1112, 0.2183, 0.1733]),
     ])
 
     val_transform = A.Compose([
         A.Resize(256, 256),
-        # A.Normalize(mean=[0.4471, 0.6659, 0.5774, 0.3395], std=[0.1112, 0.2183, 0.2230, 0.1733]),
-        A.Normalize(mean=[0.4471, 0.6659, 0.3395], std=[0.1112, 0.2183, 0.1733]), # use only intensity, entropy, alpha feature
+        A.Normalize(mean=[0.4471, 0.6659, 0.3395], std=[0.1112, 0.2183, 0.1733]),
     ])
 
     test_transform = val_transform
